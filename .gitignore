@@ -1,0 +1,8 @@
+# Ignore RubyMine workspace files
+.idea/
+
+# Ignore local lockfile
+Gemfile.lock
+
+# Ignore local database
+db/data.rb
