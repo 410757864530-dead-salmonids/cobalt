@@ -6,7 +6,8 @@ module Bot::Economy
   extend Discordrb::Commands::CommandContainer
   extend Discordrb::EventContainer
   include Bot::Models
-  
+
+  extend Convenience
   include Constants
 
   # Path to this crystal's data folder
@@ -38,9 +39,18 @@ module Bot::Economy
       'Citizen Override'    => 460505017120587796,
       'Squire Override'     => 460505130203217921,
       'Knight Override'     => 460505230128185365,
-      'Noble Override'      => 553320915409305609,
+      'Noble Override'      => 553321038478573569,
       'Monarch Override'    => 481049629773922304,
       'Wandbearer Override' => 553319697420910632
+  }.freeze
+  # Mee6 override role short names and IDs
+  OVERRIDE_ROLES_SHORT = {
+      'citizen'    => 460505017120587796,
+      'squire'     => 460505130203217921,
+      'knight'     => 460505230128185365,
+      'noble'      => 553321038478573569,
+      'monarch'    => 481049629773922304,
+      'wandbearer' => 553319697420910632
   }.freeze
   # Mee6 role IDs
   MEE6_ROLES = {
@@ -50,6 +60,15 @@ module Bot::Economy
       noble:      553320915409305609,
       monarch:    481049629773922304,
       wandbearer: 318519367971241984
+  }.freeze
+  # Mee6 role short names and IDs
+  MEE6_ROLES_SHORT = {
+      'citizen'    => 320438721923252225,
+      'squire'     => 347071589768101908,
+      'knight'     => 321206686872502274,
+      'noble'      => 553320915409305609,
+      'monarch'    => 481049629773922304,
+      'wandbearer' => 318519367971241984
   }.freeze
   # #bot_commands ID
   BOT_COMMANDS_ID = 307726225458331649
@@ -66,7 +85,7 @@ module Bot::Economy
       time_span: 120
   )
   # Bucket for rate limiting money transfers (once every minute)
-  TRANSFER_BUCKET = Bot::BOT.nucket(
+  TRANSFER_BUCKET = Bot::BOT.bucket(
       :transfer,
       limit:     1,
       time_span: 60
@@ -76,25 +95,25 @@ module Bot::Economy
 
   # Give user Starbucks for every message they send, with a 2 minute delay between earning money this way
   message do |event|
-    # Skips if event channel is disabled from message activity earning
+    # Skip if event channel is disabled from message activity earning
     next if YAML.load_data!("#{ECON_DATA_PATH}/earn_disabled_channels.yml").include? event.channel.id
 
-    # Skips is user is currently rate limited (has already earned money within the past 2 minutes)
+    # Skip is user is currently rate limited (has already earned money within the past 2 minutes)
     next if EARN_BUCKET.rate_limited? event.user.id
 
     economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
 
-    # Adds Starbucks to user and saves to database
+    # Add Starbucks to user and saves to database
     economy_user.money += (rand(1..5) * multiplier)
     economy_user.save
   end
 
   # Check user's economy profile
   command :profile, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, *args|
-    # Sets argument default to event user
+    # Set argument default to event user
     args[0] ||= event.user.id
 
-    # Breaks unless given user is valid
+    # Break unless given user is valid
     break unless (user = SERVER.get_user(args.join(' ')))
 
     economy_user = EconomyUser[user.id] || EconomyUser.create(id: user.id)
@@ -110,7 +129,7 @@ module Bot::Economy
           icon_url: user.avatar_url
       }
       embed.description = <<~DESC.strip
-        **Balance:** #{economy_user.money} Starbucks
+        **Balance:** #{pl(economy_user.money, 'Starbuck')}
         **Time until next check-in:** #{to_next_checkin}
       DESC
       embed.add_field(
@@ -134,17 +153,17 @@ module Bot::Economy
     # Otherwise:
     else
       # Add Starbucks based on user's highest Mewman role
-      earned_money = if event.user.role? MEWMAN_ROLES[:wandbearer]
+      earned_money = if event.user.role? MEE6_ROLES[:wandbearer]
                        200
-                     elsif event.user.role? MEWMAN_ROLES[:monarch]
+                     elsif event.user.role? MEE6_ROLES[:monarch]
                        175
-                     elsif event.user.role? MEWMAN_ROLES[:noble]
+                     elsif event.user.role? MEE6_ROLES[:noble]
                        150
-                     elsif event.user.role? MEWMAN_ROLES[:knight]
+                     elsif event.user.role? MEE6_ROLES[:knight]
                        125
-                     elsif event.user.role? MEWMAN_ROLES[:squire]
+                     elsif event.user.role? MEE6_ROLES[:squire]
                        100
-                     elsif event.user.role? MEWMAN_ROLES[:citizen]
+                     elsif event.user.role? MEE6_ROLES[:citizen]
                        75
                      else 50
                      end
@@ -170,24 +189,24 @@ module Bot::Economy
   end
 
   command :multiplier do |event, arg|
-    # Breaks unless user is moderator
+    # Break unless user is moderator
     break unless event.user.role? MODERATOR_ID
 
-    # If argument is given and greater than or equal to 0, sets earn multiplier to argument
+    # If argument is given and greater than or equal to 0, set earn multiplier to argument
     if arg && arg.to_i >= 0
       multiplier = arg.to_i
       event << "**Set earn multiplier to #{multiplier}x.**"
 
-    # Otherwise, returns current multiplier
+    # Otherwise, return current multiplier
     else event << "**The current earn multiplier is #{multiplier}x.**"
     end
   end
 
   # Rent a color role
-  command :rentarole do |event, arg|
+  command :rentarole, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg|
     # If argument is given:
     if arg
-      # Validates that the given argument is one of the color roles
+      # Break unless the given argument is one of the color roles
       break unless (role_id = COLOR_ROLES_SHORT[arg.downcase])
 
       role_name = COLOR_ROLES.key(role_id)
@@ -195,24 +214,33 @@ module Bot::Economy
 
       # If user has enough money to rent a role:
       if economy_user.money >= 300
-        # Takes upfront cost of 300 from user
+        # Take upfront cost of 300 Starbucks from user
         economy_user.money -= 300
 
-        # Sets user's color role info
+        # Remove existing color and override roles
+        event.user.remove_role(COLOR_ROLES.values + OVERRIDE_ROLES.values)
+
+        # Add role to user
+        event.user.add_role role_id
+
+        # Set user's color role info
         economy_user.color_role = role_name
         economy_user.color_role_daily = Time.now + COLOR_ROLE_DAILY_INTERVAL
 
-        # Saves to database
+        # Save to database
         economy_user.save
 
-        # Responds to user
-        event << "**#{event.user.mention}, you are now renting #{role_name}.** Enjoy your new color!"
+        # Respond to user
+        event << <<~RESPONSE.strip
+          **#{event.user.mention}, you are now renting #{role_name}.**
+          Enjoy your new color!
+        RESPONSE
 
-      # Otherwise, responds to user
+      # Otherwise, respond to user
       else event.send_temp("#{event.user.mention}, you don't have enough money to rent a color role!", 5)
       end
 
-    # If no argument is given, responds to user with information embed:
+    # If no argument is given, respond to user with information embed
     else
       event.send_embed do |embed|
         embed.author = {
@@ -222,7 +250,7 @@ module Bot::Economy
         embed.description = <<~DESC.strip
           This is the Rent-A-Role info page. You can rent one of the available color roles here at a time.
           Renting a role costs 300 starbucks upfront and costs 200 Starbucks a day to keep -- but it gives you a color and that's cool.
-          The roles currently available are: #{COLOR_ROLES_SHORT.keys.join(', ')}
+          The roles currently available are: #{COLOR_ROLES_SHORT.keys.map(&:capitalize).join(', ')}
           To rent a role, use this command again with the color name (i.e. `+rentarole yellow`).
           Use the command `+unrentarole` if you would like to give up your role -- you will be returned 100 Starbucks.
           However, be warned! If you are unable to pay the fee on any day, you will lose the role and will not be returned anything.
@@ -232,5 +260,148 @@ module Bot::Economy
         embed.footer = {text: 'Use +checkin once every 23 hours to earn Starbucks.'}
       end
     end
+  end
+
+  # Return a color role
+  command :unrentarole, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event|
+    economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
+
+    # Breaks unless user is renting a color role
+    break unless (role_id = COLOR_ROLES[economy_user.color_role])
+
+    # Remove role from user
+    event.user.remove_role role_id
+
+    # Remove color role info
+    economy_user.color_role = 'None'
+    economy_user.color_role_daily = nil
+
+    # Add 100 Starbucks to user
+    economy_user.money += 100
+
+    # Save to database
+    economy_user.save
+
+    # Respond to user
+    event << <<~RESPONSE.strip
+      **#{event.user.mention}, you have returned your role.**
+      100 Starbucks have been refunded to your account.
+    RESPONSE
+  end
+
+  # 30m cron job to verify users are paying for their color roles
+  SCHEDULER.cron '*/30 * * * *' do
+    # Iterate through users who are renting a role
+    EconomyUser.all.select { |eu| eu.color_role_daily }.each do |economy_user|
+      # Skip unless the time for the daily payment has passed
+      next unless economy_user.color_role_daily && Time.now > economy_user.color_role_daily
+
+      # If user has enough money to pay the daily cost:
+      if economy_user.money >= 200
+        # Take daily cost of 200 Starbucks from user
+        economy_user.money -= 200
+
+        # Set next daily payment time
+        economy_user.color_role_daily += COLOR_ROLE_DAILY_INTERVAL
+
+        # Save to database
+        economy_user.save
+
+      # Otherwise, take away role, update database and DM user
+      else
+        event.user.remove_role(COLOR_ROLES[economy_user.color_role])
+
+        economy_user.color_role = 'None'
+        economy_user.color_role_daily = nil
+        economy_user.save
+
+        event.user.dm <<~DM.strip
+          **Due to insufficient funds for today's payment, your role has been returned.**
+          No money has been deducted from your account for today's payment.
+        DM
+      end
+    end
+  end
+
+  # Purchase an override role
+  command :getoverride, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg|
+    # If argument is given:
+    if arg
+      # Break unless the given argument is one of the override roles
+      break unless (role_id = OVERRIDE_ROLES_SHORT[arg.downcase])
+
+      # Break unless user has the respective Mewman role of the override they are attempting to purchase
+      break unless event.user.role? MEE6_ROLES_SHORT[arg.downcase]
+
+      role_name = OVERRIDE_ROLES.key(role_id)
+      economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
+
+      # If user has enough money to purchase a role:
+      if economy_user.money >= 200
+        # Take cost of 200 Starbucks from user
+        economy_user.money -= 200
+
+        # Remove existing color and override roles
+        event.user.remove_role(COLOR_ROLES.values + OVERRIDE_ROLES.values)
+
+        # Adds role to user
+        event.user.add_role role_id
+
+        # Set user's color role info
+        economy_user.color_role = role_name
+
+        # Save to database
+        economy_user.save
+
+        # Respond to user
+        event << <<~RESPONSE.strip
+          **#{event.user.mention}, you now have the #{role_name}.**
+          Enjoy your new color!
+        RESPONSE
+
+        # Otherwise, respond to user
+      else event.send_temp("#{event.user.mention}, you don't have enough money to buy an override role!", 5)
+      end
+
+    # If no argument is given, respond to user with information embed
+    else
+      event.send_embed do |embed|
+        embed.author = {
+            name:     'Override Roles: Info',
+            icon_url: 'http://i68.tinypic.com/2rdkuwi.jpg'
+        }
+        embed.description = <<~DESC.strip
+          This is the override role info page. You can rent one of the available override roles here at a time.
+          Override roles let you override your current color with a Mewman role color for 200 Starbucks.
+          However, you must have the the override's respective Mewman role! (i.e. Mewman Noble for Noble override)
+          The roles currently available are: #{OVERRIDE_ROLES_SHORT.keys.map(&:capitalize).join(', ')}
+          To purchase an override role, use this command again with the color name (i.e. `+getoverride noble`).
+          Use the command `+returnoverride` if you would like to give up your role.
+        DESC
+        embed.color = 0xFFD700
+        embed.footer = {text: 'Use +checkin once every 23 hours to earn Starbucks.'}
+      end
+    end
+  end
+
+  # Return an override role
+  command :returnoverride, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event|
+    economy_user = EconomyUser[event.user.id] || User.create(id: event.user.id)
+
+    # Break unless user has an override role
+    break unless (role_id = OVERRIDE_ROLES[economy_user.color_role])
+
+    # Remove role from user
+    event.user.remove_role role_id
+
+    # Remove color role info
+    economy_user.color_role = 'None'
+    economy_user.color_role_daily = nil
+
+    # Save to database
+    economy_user.save
+
+    # Responds to user
+    event << "**#{event.user.mention}, you have returned your role.**"
   end
 end
