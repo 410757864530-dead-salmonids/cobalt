@@ -1,0 +1,5 @@
+# This file contains the IDs of channels in which earning money through message activity is disabled.
+---
+- 307726225458331649 # bot_commands
+- 402050178753757185 # bot_games
+- 308065793906704384 # muted_users
