@@ -90,6 +90,8 @@ module Bot::Economy
       limit:     1,
       time_span: 60
   )
+  # Raffle reminder role ID
+  RAFFLE_REMINDER_ID = 459714534425362434
 
   multiplier = 1
 
@@ -214,7 +216,7 @@ module Bot::Economy
 
       # If user has enough money to rent a role:
       if economy_user.money >= 300
-        # Take upfront cost of 300 Starbucks from user
+        # Deduct upfront cost of 300 Starbucks from user
         economy_user.money -= 300
 
         # Remove existing color and override roles
@@ -236,7 +238,7 @@ module Bot::Economy
           Enjoy your new color!
         RESPONSE
 
-      # Otherwise, respond to user
+      # If user does not have enough money to rent a role, respond to user
       else event.send_temp("#{event.user.mention}, you don't have enough money to rent a color role!", 5)
       end
 
@@ -255,6 +257,67 @@ module Bot::Economy
           Use the command `+unrentarole` if you would like to give up your role -- you will be returned 100 Starbucks.
           However, be warned! If you are unable to pay the fee on any day, you will lose the role and will not be returned anything.
           While you only need 300 Starbucks to make the initial payment on a role, it is recommended you have an excess of money before making the payment.
+        DESC
+        embed.color = 0xFFD700
+        embed.footer = {text: 'Use +checkin once every 23 hours to earn Starbucks.'}
+      end
+    end
+  end
+
+  # Purchase an override role
+  command :getoverride, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg|
+    # If argument is given:
+    if arg
+      # Break unless the given argument is one of the override roles
+      break unless (role_id = OVERRIDE_ROLES_SHORT[arg.downcase])
+
+      # Break unless user has the respective Mewman role of the override they are attempting to purchase
+      break unless event.user.role? MEE6_ROLES_SHORT[arg.downcase]
+
+      role_name = OVERRIDE_ROLES.key(role_id)
+      economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
+
+      # If user has enough money to purchase a role:
+      if economy_user.money >= 200
+        # Deduct cost of 200 Starbucks from user
+        economy_user.money -= 200
+
+        # Remove existing color and override roles
+        event.user.remove_role(COLOR_ROLES.values + OVERRIDE_ROLES.values)
+
+        # Adds role to user
+        event.user.add_role role_id
+
+        # Set user's color role info
+        economy_user.color_role = role_name
+
+        # Save to database
+        economy_user.save
+
+        # Respond to user
+        event << <<~RESPONSE.strip
+          **#{event.user.mention}, you now have the #{role_name}.**
+          Enjoy your new color!
+        RESPONSE
+
+      # If user does not have enough money to purchase a role, respond to user
+      else event.send_temp("#{event.user.mention}, you don't have enough money to purchase an override role!", 5)
+      end
+
+    # If no argument is given, respond to user with information embed
+    else
+      event.send_embed do |embed|
+        embed.author = {
+            name:     'Override Roles: Info',
+            icon_url: 'http://i68.tinypic.com/2rdkuwi.jpg'
+        }
+        embed.description = <<~DESC.strip
+          This is the override role info page. You can rent one of the available override roles here at a time.
+          Override roles let you override your current color with a Mewman role color for 200 Starbucks.
+          However, you must have the the override's respective Mewman role! (i.e. Mewman Noble for Noble override)
+          The roles currently available are: #{OVERRIDE_ROLES_SHORT.keys.map(&:capitalize).join(', ')}
+          To purchase an override role, use this command again with the color name (i.e. `+getoverride noble`).
+          Use the command `+returnoverride` if you would like to give up your role.
         DESC
         embed.color = 0xFFD700
         embed.footer = {text: 'Use +checkin once every 23 hours to earn Starbucks.'}
@@ -298,7 +361,7 @@ module Bot::Economy
 
       # If user has enough money to pay the daily cost:
       if economy_user.money >= 200
-        # Take daily cost of 200 Starbucks from user
+        # Deduct daily cost of 200 Starbucks from user
         economy_user.money -= 200
 
         # Set next daily payment time
@@ -307,7 +370,7 @@ module Bot::Economy
         # Save to database
         economy_user.save
 
-      # Otherwise, take away role, update database and DM user
+      # If user does not have enough money to pay the daily cost, remove role, update database and DM user
       else
         event.user.remove_role(COLOR_ROLES[economy_user.color_role])
 
@@ -323,85 +386,300 @@ module Bot::Economy
     end
   end
 
-  # Purchase an override role
-  command :getoverride, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg|
-    # If argument is given:
-    if arg
-      # Break unless the given argument is one of the override roles
-      break unless (role_id = OVERRIDE_ROLES_SHORT[arg.downcase])
+  # Add, edit, remove or call a tag
+  command :tag, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, *args|
+    # Break unless arguments are given
+    break unless args.any?
 
-      # Break unless user has the respective Mewman role of the override they are attempting to purchase
-      break unless event.user.role? MEE6_ROLES_SHORT[arg.downcase]
+    # Cases first argument
+    case args[0].downcase
+    when 'add'
+      # Break unless tag key is given
+      break unless args.size >= 2
 
-      role_name = OVERRIDE_ROLES.key(role_id)
-      economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
+      # If user has enough money to purchase a tag:
+      if (economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)).money >= 30
+        # If tag already exists, respond to user
+        if Tag[key: (key = args[1..-1].join(' '))]
+          event.send_temp('That tag already exists!', 5)
 
-      # If user has enough money to purchase a role:
-      if economy_user.money >= 200
-        # Take cost of 200 Starbucks from user
-        economy_user.money -= 200
+        # Otherwise:
+        else
+          tag = Tag.create(key: key, user: event.user.id)
 
-        # Remove existing color and override roles
-        event.user.remove_role(COLOR_ROLES.values + OVERRIDE_ROLES.values)
+          # Deduct 30 Starbucks from user
+          economy_user.money -= 30
 
-        # Adds role to user
-        event.user.add_role role_id
+          # Prompt user for tag content and await response
+          prompt = event.respond <<~RESPONSE.strip
+            **Registered the tag "#{key}" to you for 30 Starbucks, #{event.user.mention}!**
+            Reply with what you would like it to say.
+          RESPONSE
+          response = prompt.await!
 
-        # Set user's color role info
-        economy_user.color_role = role_name
+          # Set tag content and save to database
+          tag.content = response.message.content
+          tag.save
 
-        # Save to database
-        economy_user.save
+          # Delete prompt and response
+          prompt.delete
+          response.delete
 
-        # Respond to user
-        event << <<~RESPONSE.strip
-          **#{event.user.mention}, you now have the #{role_name}.**
-          Enjoy your new color!
-        RESPONSE
+          # Respond to user
+          event << '**The tag has been added.**'
+        end
 
-        # Otherwise, respond to user
-      else event.send_temp("#{event.user.mention}, you don't have enough money to buy an override role!", 5)
+      # If user does not have enough money, respond to user
+      else event.send_temp("#{event.user.mention}, you don't have enough money to purchase a tag!", 5)
       end
 
-    # If no argument is given, respond to user with information embed
+    when 'edit'
+      # Break unless tag key is given
+      break unless args.size >= 2
+
+      # If tag with given key exists:
+      if (tag = Tag[key: args[1..-1].join(' ')])
+        # If tag belongs to event user:
+        if tag.user == event.user.id
+          # Prompt user for tag content and await response
+          prompt = event.respond <<~RESPONSE.strip
+            **Now editing your tag "#{tag.key}", #{event.user.mention}!**
+            Reply with what you would like it to say.
+          RESPONSE
+          response = prompt.await!
+
+          # Set new tag content and save to database
+          tag.content = response.message.content
+          tag.save
+
+          # Delete prompt and response
+          prompt.delete
+          response.delete
+
+          # Respond to user
+          event << '**The tag has been edited.**'
+
+        # If tag does not belong to event user, respond to user
+        else event.send_temp("#{event.user.mention}, that tag doesn't belong to you!", 5)
+        end
+
+      # If no tag with given key exists, respond to user
+      else event.send_temp("That tag doesn't exist!", 5)
+      end
+
+    when 'delete', 'remove'
+      # Break unless tag key is given
+      break unless args.size >= 2
+
+      # If tag with given key exists:
+      if (tag = Tag[key: args[1..-1].join(' ')])
+        # If tag belongs to event user or user is moderator, delete tag and respond to user
+        if tag.user == event.user.id ||
+           event.user.role?(MODERATOR_ID)
+          tag.destroy
+          event << '**The tag has been deleted.**'
+
+        # Otherwise, respond to user
+        else event.send_temp("#{event.user.mention}, that tag doesn't belong to you!", 5)
+        end
+
+      # If no tag with given key exists, respond to user
+      else event.send_temp("That tag doesn't exist!", 5)
+      end
+
     else
-      event.send_embed do |embed|
-        embed.author = {
-            name:     'Override Roles: Info',
-            icon_url: 'http://i68.tinypic.com/2rdkuwi.jpg'
-        }
-        embed.description = <<~DESC.strip
-          This is the override role info page. You can rent one of the available override roles here at a time.
-          Override roles let you override your current color with a Mewman role color for 200 Starbucks.
-          However, you must have the the override's respective Mewman role! (i.e. Mewman Noble for Noble override)
-          The roles currently available are: #{OVERRIDE_ROLES_SHORT.keys.map(&:capitalize).join(', ')}
-          To purchase an override role, use this command again with the color name (i.e. `+getoverride noble`).
-          Use the command `+returnoverride` if you would like to give up your role.
-        DESC
-        embed.color = 0xFFD700
-        embed.footer = {text: 'Use +checkin once every 23 hours to earn Starbucks.'}
+      # Break unless tag with given key exists
+      break unless (tag = Tag[key: args.join('')])
+
+      # Respond with tag content
+      event << tag.content
+    end
+  end
+
+  # Add, edit or remove a custom command
+  command :mycom, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg1, arg2|
+    # Break unless at least the first argument is given
+    break unless arg1
+
+    # Cases first argument
+    case arg1.downcase
+    when 'set'
+      # Break unless command name is given
+      break unless arg2
+
+      # If user has enough money to purchase a tag:
+      if (economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)).money >= 15000
+        # If command already exists, respond to user
+        if CustomCommand[name: (name = arg2.downcase)]
+          event.send_temp('A custom command with that name already exists!', 5)
+
+        # Otherwise:
+        else
+          command = CustomCommand.create(name: name, user: event.user.id)
+
+          # Deduct 15000 Starbucks from user
+          economy_user.money -= 15000
+
+          # Prompt user for command content and await response
+          prompt = event.respond <<~RESPONSE.strip
+            **Registered the command +#{name} to you for 15000 Starbucks, #{event.user.mention}!**
+            Reply with what you would like it to say.
+          RESPONSE
+          response = prompt.await!
+
+          # Set command content and save to database
+          command.content = response.message.content
+          command.save
+
+          # Delete prompt and response
+          prompt.delete
+          response.delete
+
+          # Respond to user
+          event << '**The command has been set.**'
+        end
+
+        # If user does not have enough money, respond to user
+      else event.send_temp("#{event.user.mention}, you don't have enough money to purchase a custom command!", 5)
+      end
+
+    when 'edit'
+      # Break unless user has a custom command
+      break unless (command = CustomCommand[user: event.user.id])
+
+      # Prompt user for tag content and await response
+      prompt = event.respond <<~RESPONSE.strip
+        **Now editing your command +"#{command.name}", #{event.user.mention}!**
+        Reply with what you would like it to say.
+      RESPONSE
+      response = prompt.await!
+
+      # Set new tag content and save to database
+      command.content = response.message.content
+      command.save
+
+      # Delete prompt and response
+      prompt.delete
+      response.delete
+
+      # Respond to user
+      event << '**The command has been edited.**'
+
+    when 'delete', 'remove'
+      # If user is a moderator and command name has been given:
+      if event.user.role?(MODERATOR_ID) &&
+         arg2
+        # If a custom command with the given name exists, delete it and respond to user
+        if (command = CustomCommand[name: arg2.downcase])
+          command.destroy
+          event << '**The command has been deleted.**'
+
+        # Otherwise, respond to user
+        else event.send_temp("That command doesn't exist!", 5)
+        end
+
+      # If user has a custom command, delete it and respond to user
+      elsif (command = CustomCommand[user: event.user.id])
+        command.destroy
+        event << '**The command has been deleted.**'
       end
     end
   end
 
-  # Return an override role
-  command :returnoverride, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event|
-    economy_user = EconomyUser[event.user.id] || User.create(id: event.user.id)
+  # Respond to user when they are using their custom command
+  message start_with: '+' do |event|
+    # Skip unless a custom command with the given name exists
+    next unless (command = CustomCommand[name: event.message.content[1..-1]])
 
-    # Break unless user has an override role
-    break unless (role_id = OVERRIDE_ROLES[economy_user.color_role])
+    # Skip unless the one calling the command is the command's owner
+    next unless command.user == event.user.id
 
-    # Remove role from user
-    event.user.remove_role role_id
+    # Respond to user
+    event << command.content
+  end
 
-    # Remove color role info
-    economy_user.color_role = 'None'
-    economy_user.color_role_daily = nil
+  # Display richest users
+  command :richest, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event|
+    sorted_economy_users = EconomyUser.order(:money).reverse.all
+    sorted_economy_users.select! { |eu| Bot::BOT.user(eu.id) }
+    richest = sorted_economy_users[0..9]
 
-    # Save to database
-    economy_user.save
+    # Respond with embed containing leaderboard
+    event.send_embed do |embed|
+      embed.author = {
+          name:     'Bank: Top 10',
+          icon_url: 'http://i68.tinypic.com/2rdkuwi.jpg'
+      }
+      embed.description = richest.each_with_index.map do |economy_user, index|
+        "• **#{index + 1} - #{Bot::BOT.user(economy_user.id).distinct}** #{economy_user.money} Starbucks"
+      end.join("\n")
+      embed.color = 0xFFD700
+    end
+  end
 
-    # Responds to user
-    event << "**#{event.user.mention}, you have returned your role.**"
+  # Display raffle info, purchase ticket(s) or toggle raffle reminder role
+  command :raffle, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg1 = 'check', arg2 = '1'|
+    raffle = Raffle.get
+
+    # Case first argument
+    case arg1.downcase
+    when 'check', 'info'
+      # Respond with embed containing raffle info
+      event.send_embed do |embed|
+        embed.author = {
+            name:     'Raffle: Info',
+            icon_url: 'http://i68.tinypic.com/2rdkuwi.jpg'
+        }
+        embed.description = <<~DESC.strip
+          **Current prize:** #{raffle.pool} Starbucks
+          **Time until winner draw:** #{(raffle.end_time - Time.now).round.to_dhms}
+          **Your tickets:** #{raffle.tickets.count { |t| t.user == event.user.id }}
+
+          **Use the command `+raffle buyticket [number]` (default 1) to purchase raffle tickets.**
+          Tickets cost 100 Starbucks each.
+        DESC
+        embed.color = 0xFFD700
+        embed.footer = {text: 'Use `+raffle reminder` to be pinged every time a new raffle starts.'}
+      end
+
+    when 'buyticket'
+      # Break unless the number of tickets to buy is greater than 0
+      break unless (tickets = arg2.to_i > 0)
+
+      economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
+
+      # Break unless user has enough money to purchase given number of tickets
+      break unless economy_user.money > 100 * tickets
+
+      # Iterate the given number of times and deduct ticket cost from user, create ticket, add ticket to
+      # raffle and add to prize pool
+      tickets.times do
+        economy_user.money -= 100
+        ticket = RaffleTicket.create(id: event.user.id)
+        raffle.add_raffle_ticket(ticket)
+        raffle.pool += 80
+      end
+
+      # Save to database
+      raffle.save
+
+      # Respond to user
+      event << <<~RESPONSE.strip
+        **#{event.user.mention}, you have purchased #{pl(ticket, 'ticket')} for #{tickets * 100} Starbucks.**
+        The current prize pool is #{raffle.pool} Starbucks.
+      RESPONSE
+
+    when 'reminder'
+      # If user has reminder role, remove it and respond to user
+      if event.user.role? RAFFLE_REMINDER_ID
+        event.user.remove_role RAFFLE_REMINDER_ID
+        event.send_temp("#{event.user.mention}, you will no longer be pinged when a new raffle starts.", 5)
+
+      # Otherwise, add role and respond to user
+      else
+        event.user.add_role RAFFLE_REMINDER_ID
+        event.send_temp("#{event.user.mention}, you will now be pinged when a new raffle starts.", 5)
+      end
+    end
   end
 end

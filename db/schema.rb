@@ -4,12 +4,6 @@ require 'sequel'
 
 module Schema
   Sequel.sqlite(ENV['DB_PATH']) do |db|
-    db.create_table?(:custom_commands) do
-      String :key, :size=>255
-      String :content, :size=>255
-      Integer :user
-    end
-
     db.create_table?(:tags) do
       String :key, :size=>255
       String :content, :size=>255
@@ -22,6 +16,24 @@ module Schema
       DateTime :next_checkin
       String :color_role, :default=>"None", :size=>255
       DateTime :color_role_daily
+    end
+
+    db.create_table?(:custom_commands) do
+      String :name, :size=>255
+      String :content, :size=>255
+      Integer :user
+    end
+
+    db.create_table?(:raffles) do
+      primary_key :id
+      Integer :pool
+      DateTime :end_time
+    end
+
+    db.create_table?(:raffle_tickets) do
+      primary_key :id
+      Integer :user
+      foreign_key :raffle_id, :raffles
     end
   end
 end
