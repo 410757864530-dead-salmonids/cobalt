@@ -12,14 +12,19 @@ puts '+ Loaded database'
 # Loads models based on MODELS_TO_LOAD environment variable unless WITHOUT_MODELS is defined
 unless ENV['WITHOUT_MODELS']
   models_to_load = ENV['MODELS_TO_LOAD'].split(',').map do |model_name|
-    if (path = Dir['app/models/*.rb'].find { |p| File.basename(p, '.*').camelize == model_name })
-      [model_name, path]
-    else raise Error, "ERROR: Model #{model_name} not found"
-    end
+    model_path = if File.exists? "app/models/#{model_name.underscore}_singleton.rb"
+                   singleton = true
+                   "app/models/#{model_name.underscore}_singleton.rb"
+                 else
+                   singleton = false
+                   "app/models/#{model_name.underscore}.rb"
+                 end
+    [model_name.camelize, model_path, singleton]
   end
-  models_to_load.each do |model_name, path|
-    load path
-    puts "+ Loaded model class #{model_name}"
+
+  models_to_load.each do |model_name, model_path, singleton|
+    load model_path
+    puts "+ Loaded#{singleton ? ' singleton' : nil} model class #{model_name}"
   end
 end
 
