@@ -28,13 +28,13 @@ end
 module Convenience
   module_function
 
-  # Returns pluralized form of str only if the given int is not 1
+  # Returns pluralized form of str if the given int is not 1; return singularized form otherwise
   # @param  [Integer] int the integer to test
   # @param  [String]  str the string to pluralize
   # @return [String]  singular form (i.e. 1 squid) if int is 1, plural form (8 squids) otherwise
   def plural(int, str)
     return "#{int} #{str.pluralize}" unless int == 1
-    "#{int} #{str}"
+    "#{int} #{str.singularize}"
   end
   alias_method(:pl, :plural)
 end

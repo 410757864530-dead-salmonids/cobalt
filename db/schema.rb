@@ -24,16 +24,16 @@ module Schema
       Integer :user
     end
 
-    db.create_table?(:raffles) do
-      primary_key :id
-      Integer :pool
-      DateTime :end_time
-    end
-
     db.create_table?(:raffle_tickets) do
       primary_key :id
       Integer :user
-      foreign_key :raffle_id, :raffles
+      foreign_key :raffle_id, :raffle
+    end
+
+    db.create_table?(:raffle) do
+      primary_key :id
+      Integer :pool, :default=>150
+      DateTime :end_time
     end
   end
 end
