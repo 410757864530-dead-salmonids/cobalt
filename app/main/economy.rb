@@ -388,116 +388,6 @@ module Bot::Economy
     end
   end
 
-  # Add, edit, remove or call a tag
-  command :tag, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, *args|
-    # Break unless arguments are given
-    break unless args.any?
-
-    # Cases first argument
-    case args[0].downcase
-    when 'add'
-      # Break unless tag key is given
-      break unless args.size >= 2
-
-      # If user has enough money to purchase a tag:
-      if (economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)).money >= 30
-        # If tag already exists, respond to user
-        if Tag[key: (key = args[1..-1].join(' '))]
-          event.send_temp('That tag already exists!', 5)
-
-        # Otherwise:
-        else
-          tag = Tag.create(key: key, user: event.user.id)
-
-          # Deduct 30 Starbucks from user
-          economy_user.money -= 30
-
-          # Prompt user for tag content and await response
-          prompt = event.respond <<~RESPONSE.strip
-            **Registered the tag "#{key}" to you for 30 Starbucks, #{event.user.mention}!**
-            Reply with what you would like it to say.
-          RESPONSE
-          response = prompt.await!
-
-          # Set tag content and save to database
-          tag.content = response.message.content
-          tag.save
-
-          # Delete prompt and response
-          prompt.delete
-          response.delete
-
-          # Respond to user
-          event << '**The tag has been added.**'
-        end
-
-      # If user does not have enough money, respond to user
-      else event.send_temp("#{event.user.mention}, you don't have enough money to purchase a tag!", 5)
-      end
-
-    when 'edit'
-      # Break unless tag key is given
-      break unless args.size >= 2
-
-      # If tag with given key exists:
-      if (tag = Tag[key: args[1..-1].join(' ')])
-        # If tag belongs to event user:
-        if tag.user == event.user.id
-          # Prompt user for tag content and await response
-          prompt = event.respond <<~RESPONSE.strip
-            **Now editing your tag "#{tag.key}", #{event.user.mention}!**
-            Reply with what you would like it to say.
-          RESPONSE
-          response = prompt.await!
-
-          # Set new tag content and save to database
-          tag.content = response.message.content
-          tag.save
-
-          # Delete prompt and response
-          prompt.delete
-          response.delete
-
-          # Respond to user
-          event << '**The tag has been edited.**'
-
-        # If tag does not belong to event user, respond to user
-        else event.send_temp("#{event.user.mention}, that tag doesn't belong to you!", 5)
-        end
-
-      # If no tag with given key exists, respond to user
-      else event.send_temp("That tag doesn't exist!", 5)
-      end
-
-    when 'delete', 'remove'
-      # Break unless tag key is given
-      break unless args.size >= 2
-
-      # If tag with given key exists:
-      if (tag = Tag[key: args[1..-1].join(' ')])
-        # If tag belongs to event user or user is moderator, delete tag and respond to user
-        if tag.user == event.user.id ||
-           event.user.role?(MODERATOR_ID)
-          tag.destroy
-          event << '**The tag has been deleted.**'
-
-        # Otherwise, respond to user
-        else event.send_temp("#{event.user.mention}, that tag doesn't belong to you!", 5)
-        end
-
-      # If no tag with given key exists, respond to user
-      else event.send_temp("That tag doesn't exist!", 5)
-      end
-
-    else
-      # Break unless tag with given key exists
-      break unless (tag = Tag[key: args.join('')])
-
-      # Respond with tag content
-      event << tag.content
-    end
-  end
-
   # Add, edit or remove a custom command
   command :mycom, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg1, arg2|
     # Break unless at least the first argument is given
@@ -527,7 +417,7 @@ module Bot::Economy
             **Registered the command +#{name} to you for 15000 Starbucks, #{event.user.mention}!**
             Reply with what you would like it to say.
           RESPONSE
-          response = prompt.await!
+          response = event.message.await!
 
           # Set command content and save to database
           command.content = response.message.content
@@ -535,7 +425,7 @@ module Bot::Economy
 
           # Delete prompt and response
           prompt.delete
-          response.delete
+          response.message.delete
 
           # Respond to user
           event << '**The command has been set.**'
@@ -597,14 +487,17 @@ module Bot::Economy
     next unless command.user == event.user.id
 
     # Respond to user
-    event << command.content
+    event.respond command.content
   end
 
   # Display richest users
   command :richest, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event|
     sorted_economy_users = EconomyUser.order(:money).reverse.all
-    sorted_economy_users.select! { |eu| Bot::BOT.user(eu.id) }
-    richest = sorted_economy_users[0..9]
+    richest = Array.new
+    sorted_economy_users.each do |economy_user|
+      break if richest.size == 10
+      richest.push(economy_user) if Bot::BOT.user(economy_user.id)
+    end
 
     # Respond with embed containing leaderboard
     event.send_embed do |embed|
@@ -635,7 +528,7 @@ module Bot::Economy
         embed.description = <<~DESC.strip
           **Current prize:** #{raffle.pool} Starbucks
           **Time until winner draw:** #{(raffle.end_time - Time.now).round.to_dhms}
-          **Your tickets:** #{raffle.tickets.count { |t| t.user == event.user.id }}
+          **Your tickets:** #{raffle.raffle_tickets.count { |t| t.user == event.user.id }}
 
           **Use the command `+raffle buyticket [number]` (default 1) to purchase raffle tickets.**
           Tickets cost 100 Starbucks each.
@@ -646,7 +539,7 @@ module Bot::Economy
 
     when 'buyticket'
       # Break unless the number of tickets to buy is greater than 0
-      break unless (tickets = arg2.to_i > 0)
+      break unless (tickets = arg2.to_i) > 0
 
       economy_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
 
@@ -657,7 +550,7 @@ module Bot::Economy
       # raffle and add to prize pool
       tickets.times do
         economy_user.money -= 100
-        ticket = RaffleTicket.create(id: event.user.id)
+        ticket = RaffleTicket.create(user: event.user.id)
         raffle.add_raffle_ticket(ticket)
         raffle.pool += 80
       end
@@ -667,11 +560,11 @@ module Bot::Economy
 
       # Respond to user
       event << <<~RESPONSE.strip
-        **#{event.user.mention}, you have purchased #{pl(ticket, 'ticket')} for #{tickets * 100} Starbucks.**
+        **#{event.user.mention}, you have purchased #{pl(tickets, 'ticket')} for #{tickets * 100} Starbucks.**
         The current prize pool is #{raffle.pool} Starbucks.
       RESPONSE
 
-    when 'reminder'
+    when 'reminder', 'notify'
       # If user has reminder role, remove it and respond to user
       if event.user.role? RAFFLE_REMINDER_ID
         event.user.remove_role RAFFLE_REMINDER_ID
@@ -697,14 +590,14 @@ module Bot::Economy
           if index == 0
             msg = Bot::BOT.send_message(BOT_COMMANDS_ID, '**The raffle draw will occur in 5 seconds...**')
           else
-            msg = Bot::BOT.send_message("**#{pl(5 - index, 'seconds')}...**")
+            msg = Bot::BOT.send_message(BOT_COMMANDS_ID, "**#{pl(5 - index, 'seconds')}...**")
           end
           msgs.push(msg)
           sleep 1
         end
 
         # Delete countdown messages
-        msg.each(&:delete)
+        msgs.each(&:delete)
 
         winning_ticket = loop do
           if Bot::BOT.user((ticket = raffle.raffle_tickets.sample).user)
@@ -745,8 +638,95 @@ module Bot::Economy
               Tickets cost 100 Starbucks each.
             MESSAGE
         )
-        raffle_role.mentionable = false
+        raffle_reminder.mentionable = false
       end
     end.call
+  end
+
+  # Transfer money to another user
+  command :transfermoney, channels: [BOT_COMMANDS_ID, MODERATION_CHANNEL_ID] do |event, arg1 = '', arg2|
+    # Break unless user and money to transfer are given and given user is valid
+    break unless (user = SERVER.get_user(arg1)) &&
+                 (sent_money = arg2.to_i) > 0
+
+    # If event user has been rate limited, respond to user and break
+    if (secs = TRANSFER_BUCKET.rate_limited?(event.user.id))
+      event.send_temp(
+          "**#{event.user.mention}, this command is on cooldown!** Time until next usage: #{secs.round.to_dhms}",
+          5
+      )
+      break
+    end
+
+    sending_user = EconomyUser[event.user.id] || EconomyUser.create(id: event.user.id)
+    receiving_user = EconomyUser[user.id] || EconomyUser.create(id: user.id)
+
+    # If event user does not have enough money to send the given value, respond to user and break
+    if sending_user.money < sent_money
+      event.send_temp("#{event.user.mention}, you don't have enough money to send that much!", 5)
+      break
+    end
+
+    transaction_fee = (sent_money * 0.08).round
+    received_money = sent_money - transaction_fee
+    raffle = Raffle.instance
+
+    # Deduct sent money from event user, add received money to given user and add transaction fee to raffle pool
+    sending_user.money -= sent_money
+    receiving_user.money += received_money
+    raffle.pool += transaction_fee
+
+    # Save to database
+    sending_user.save
+    receiving_user.save
+    raffle.save
+
+    # Respond with embed containing transaction info
+    event.send_embed do |embed|
+      embed.author = {
+          name:     'Bank: Transfer',
+          icon_url: 'http://i68.tinypic.com/2rdkuwi.jpg'
+      }
+      embed.description = <<~DESC.strip
+        **Users:** #{event.user.mention} → #{user.mention}
+
+        **Money sent:** #{sent_money} Starbucks
+        **8% transaction fee:** #{transaction_fee} Starbucks
+        **Money received:** #{received_money} Starbucks
+      DESC
+      embed.color = 0xFFD700
+      embed.footer = {text: 'Transfer fee goes into the prize pool of the currently running raffle.'}
+    end
+  end
+
+  # Add money to user
+  command :addmoney do |event, arg1, arg2 = ''|
+    # Break unless user is moderator and valid user is given
+    break unless event.user.role?(MODERATOR_ID) &&
+                 (user = SERVER.get_user(arg1))
+
+    # Add money to given user, save to database and respond to user
+    economy_user = EconomyUser[user.id] || EconomyUser.create(id: user.id)
+    economy_user.money += arg2.to_i
+    economy_user.save
+    event << "Added **#{pl(arg2.to_i, 'Starbucks')}** to user's money."
+  end
+
+  # Add money to user
+  command :removemoney do |event, arg1, arg2 = ''|
+    # Break unless user is moderator and valid user is given
+    break unless event.user.role?(MODERATOR_ID) &&
+                 (user = SERVER.get_user(arg1))
+
+    # Subtract money from given user
+    economy_user = EconomyUser[user.id] || EconomyUser.create(id: user.id)
+    economy_user.money += arg2.to_i
+
+    # Set user's money to 0 if it has gone below and save to database
+    economy_user.money = [0, economy_user.money].max
+    economy_user.save
+
+    # Respond to user
+    event << "Deducted **#{pl(arg2.to_i, 'Starbucks')}** from user's money."
   end
 end
