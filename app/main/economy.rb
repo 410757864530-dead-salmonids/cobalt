@@ -441,10 +441,10 @@ module Bot::Economy
 
       # Prompt user for tag content and await response
       prompt = event.respond <<~RESPONSE.strip
-        **Now editing your command +"#{command.name}", #{event.user.mention}!**
+        **Now editing your command +#{command.name}, #{event.user.mention}!**
         Reply with what you would like it to say.
       RESPONSE
-      response = prompt.await!
+      response = event.message.await!
 
       # Set new tag content and save to database
       command.content = response.message.content
@@ -452,7 +452,7 @@ module Bot::Economy
 
       # Delete prompt and response
       prompt.delete
-      response.delete
+      response.message.delete
 
       # Respond to user
       event << '**The command has been edited.**'
