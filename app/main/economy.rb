@@ -617,29 +617,32 @@ module Bot::Economy
         # Give prize pool to user
         (EconomyUser[winning_ticket.user] || EconomyUser.create(id: winning_ticket.user)).money += raffle.pool
 
-        # Set new raffle pool and end time
-        raffle.pool = 150
-        raffle.end_time += RAFFLE_LENGTH
-
-        # Delete all raffle tickets
-        raffle.raffle_tickets_dataset.destroy
-
-        # Save to database
-        raffle.save
-
-        # Send new raffle message and ping notify role
-        raffle_reminder = SERVER.role(RAFFLE_REMINDER_ID)
-        raffle_reminder.mentionable = true
-        Bot::BOT.send_message(
-            BOT_COMMANDS_ID,
-            <<~MESSAGE.strip
-              **#{raffle_reminder.mention} A new raffle has begun!**
-              Use the command `+raffle buyticket [number]` (default 1) to purchase raffle tickets.
-              Tickets cost 100 Starbucks each.
-            MESSAGE
-        )
-        raffle_reminder.mentionable = false
+      # If no users entered the raffle, send no entry message
+      else Bot::BOT.send_message(BOT_COMMANDS_ID, '**No one entered the raffle. Aww...**')
       end
+
+      # Set new raffle pool and end time
+      raffle.pool = 150
+      raffle.end_time += RAFFLE_LENGTH
+
+      # Delete all raffle tickets
+      raffle.raffle_tickets_dataset.destroy
+
+      # Save to database
+      raffle.save
+
+      # Send new raffle message pinging notify role
+      raffle_reminder = SERVER.role(RAFFLE_REMINDER_ID)
+      raffle_reminder.mentionable = true
+      Bot::BOT.send_message(
+          BOT_COMMANDS_ID,
+          <<~MESSAGE.strip
+            **#{raffle_reminder.mention} A new raffle has begun!**
+            Use the command `+raffle buyticket [number]` (default 1) to purchase raffle tickets.
+            Tickets cost 100 Starbucks each.
+          MESSAGE
+      )
+      raffle_reminder.mentionable = false
     end.call
   end
 
