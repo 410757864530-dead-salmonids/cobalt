@@ -6,3 +6,6 @@ Gemfile.lock
 
 # Ignore local database
 db/data.db
+
+# Ignore dev crystals
+app/dev/*.rb
