@@ -78,7 +78,7 @@ module Bot::Chat
     chat_user.save
 
     # Send message in channel pinging online staff that a user would like to speak with them
-    channel.send("@ here **User #{event.user.distinct} would like to speak with the staff.**")
+    channel.send("@here **User #{event.user.distinct} would like to speak with the staff.**")
 
     # Add event handler for messages sent in the channel and store it in hash
     event_handlers[event.user.id] = Bot::BOT.message in: channel do |subevent|
