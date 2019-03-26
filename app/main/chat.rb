@@ -153,8 +153,12 @@ module Bot::Chat
 
     user = Bot::BOT.user(chat_user.id)
 
-    # DM user
-    user.dm '**Your chat session with the staff has ended.**'
+    # DM user, rescuing exception in case user has left server
+    begin
+      user.dm '**Your chat session with the staff has ended.**'
+    rescue Discordrb::Errors::NoPermission => e
+      # empty
+    end
 
     # Write chat log to file and upload to log channel
     File.open("#{ENV['DATA_PATH']}/log.txt", 'w') do |file|
