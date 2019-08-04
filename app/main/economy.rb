@@ -374,13 +374,14 @@ module Bot::Economy
 
       # If user does not have enough money to pay the daily cost, remove role, update database and DM user
       else
-        event.user.remove_role(COLOR_ROLES[economy_user.color_role])
+        user = SERVER.member(economy_user.id)
+        user.remove_role(COLOR_ROLES[economy_user.color_role])
 
         economy_user.color_role = 'None'
         economy_user.color_role_daily = nil
         economy_user.save
 
-        event.user.dm <<~DM.strip
+        user.dm <<~DM.strip
           **Due to insufficient funds for today's payment, your role has been returned.**
           No money has been deducted from your account for today's payment.
         DM
