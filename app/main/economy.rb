@@ -580,71 +580,73 @@ module Bot::Economy
   end
 
   # Schedule Rufus job at raffle end time for raffle draw, repeating every 3 days starting at raffle end time
-  SCHEDULER.at Raffle.instance.end_time do
-    SCHEDULER.schedule_every RAFFLE_LENGTH do
-      # If users entered the raffle:
-      if (raffle = Raffle.instance).raffle_tickets.any?
-        msgs = Array.new
+  ready do
+    SCHEDULER.at Raffle.instance.end_time do
+      SCHEDULER.schedule_every RAFFLE_LENGTH do
+        # If users entered the raffle:
+        if (raffle = Raffle.instance).raffle_tickets.any?
+          msgs = Array.new
 
-        # Send 5 countdown messages
-        5.times do |index|
-          if index == 0
-            msg = Bot::BOT.send_message(BOT_COMMANDS_ID, '**The raffle draw will occur in 5 seconds...**')
-          else
-            msg = Bot::BOT.send_message(BOT_COMMANDS_ID, "**#{pl(5 - index, 'seconds')}...**")
+          # Send 5 countdown messages
+          5.times do |index|
+            if index == 0
+              msg = Bot::BOT.send_message(BOT_COMMANDS_ID, '**The raffle draw will occur in 5 seconds...**')
+            else
+              msg = Bot::BOT.send_message(BOT_COMMANDS_ID, "**#{pl(5 - index, 'seconds')}...**")
+            end
+            msgs.push(msg)
+            sleep 1
           end
-          msgs.push(msg)
-          sleep 1
+
+          # Delete countdown messages
+          msgs.each(&:delete)
+
+          winning_ticket = loop do
+            if Bot::BOT.user((ticket = raffle.raffle_tickets.sample).user)
+              break ticket
+            end
+          end
+
+          # Send raffle draw message
+          Bot::BOT.send_message(
+              BOT_COMMANDS_ID,
+              <<~MESSAGE.strip
+                **The winner is #{Bot::BOT.user(winning_ticket.user).mention}!**
+                They win the prize pool of #{raffle.pool} Starbucks.
+              MESSAGE
+          )
+
+          # Give prize pool to user
+          (EconomyUser[winning_ticket.user] || EconomyUser.create(id: winning_ticket.user)).money += raffle.pool
+
+        # If no users entered the raffle, send no entry message
+        else Bot::BOT.send_message(BOT_COMMANDS_ID, '**No one entered the raffle. Aww...**')
         end
 
-        # Delete countdown messages
-        msgs.each(&:delete)
+        # Set new raffle pool and end time
+        raffle.pool = 150
+        raffle.end_time += RAFFLE_LENGTH
 
-        winning_ticket = loop do
-          if Bot::BOT.user((ticket = raffle.raffle_tickets.sample).user)
-            break ticket
-          end
-        end
+        # Delete all raffle tickets
+        raffle.raffle_tickets_dataset.destroy
 
-        # Send raffle draw message
+        # Save to database
+        raffle.save
+
+        # Send new raffle message pinging notify role
+        raffle_reminder = SERVER.role(RAFFLE_REMINDER_ID)
+        raffle_reminder.mentionable = true
         Bot::BOT.send_message(
             BOT_COMMANDS_ID,
             <<~MESSAGE.strip
-              **The winner is #{Bot::BOT.user(winning_ticket.user).mention}!**
-              They win the prize pool of #{raffle.pool} Starbucks.
+              **#{raffle_reminder.mention} A new raffle has begun!**
+              Use the command `+raffle buyticket [number]` (default 1) to purchase raffle tickets.
+              Tickets cost 100 Starbucks each.
             MESSAGE
         )
-
-        # Give prize pool to user
-        (EconomyUser[winning_ticket.user] || EconomyUser.create(id: winning_ticket.user)).money += raffle.pool
-
-      # If no users entered the raffle, send no entry message
-      else Bot::BOT.send_message(BOT_COMMANDS_ID, '**No one entered the raffle. Aww...**')
-      end
-
-      # Set new raffle pool and end time
-      raffle.pool = 150
-      raffle.end_time += RAFFLE_LENGTH
-
-      # Delete all raffle tickets
-      raffle.raffle_tickets_dataset.destroy
-
-      # Save to database
-      raffle.save
-
-      # Send new raffle message pinging notify role
-      raffle_reminder = SERVER.role(RAFFLE_REMINDER_ID)
-      raffle_reminder.mentionable = true
-      Bot::BOT.send_message(
-          BOT_COMMANDS_ID,
-          <<~MESSAGE.strip
-            **#{raffle_reminder.mention} A new raffle has begun!**
-            Use the command `+raffle buyticket [number]` (default 1) to purchase raffle tickets.
-            Tickets cost 100 Starbucks each.
-          MESSAGE
-      )
-      raffle_reminder.mentionable = false
-    end.call
+        raffle_reminder.mentionable = false
+      end.call
+    end
   end
 
   # Transfer money to another user
